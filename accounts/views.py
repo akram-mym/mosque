@@ -60,7 +60,7 @@ from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from .models import Member
 from .permissions import MemberRolePermission
-from .serializers import MemberSerializer
+from .serializers import MemberSerializer, ReceiptbookSerializer
 
 
 class MemberListCreateView(generics.ListCreateAPIView):
@@ -83,14 +83,14 @@ class MemberDetailView(generics.RetrieveUpdateDestroyAPIView):
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Donation, DonationCategory, DonationYear, Receitbook, UserProfile
+from .models import Donation, DonationCategory, DonationYear, Receiptbook, UserProfile
 from .permissions import AdminRoleOrAuthenticatedReadOnly, DonationRolePermission, IsAdminRole
 from .serializers import (
     AdminCreateUserSerializer,
     DonationSerializer,
     DonationCategorySerializer,
     DonationYearSerializer,
-    ReceitbookSerializer,
+    ReceiptbookGenerationSerializer,
     UserProfileSerializer,
     get_user_village_access,
 )
@@ -151,24 +151,33 @@ class DonationYearDetailView(
     lookup_field = "year_id"
 
 
-class ReceitbookListCreateView(
-    AdminOnlyCRUDViewMixin,
-    generics.ListCreateAPIView,
-):
-    queryset = Receitbook.objects.select_related("for_user", "entry_by").all()
-    serializer_class = ReceitbookSerializer
+class ReceiptbookListCreateView(generics.ListCreateAPIView):
+    serializer_class = ReceiptbookSerializer
 
-    def perform_create(self, serializer):
-        serializer.save(entry_by=self.request.user)
+    def get_queryset(self):
+        user = self.request.user
+        queryset = Receiptbook.objects.all()
+
+        # ✅ ১. চেক করবো ইউজার নিজের রিসিট চাইছে কিনা (for_me=true)
+        for_me = self.request.query_params.get('for_me', None)
+        if for_me == 'true':
+            queryset = queryset.filter(for_user=user)
+
+        # ✅ ২. চেক করবো নির্দিষ্ট কোনো স্ট্যাটাসের রিসিট চাইছে কিনা (status=unused)
+        status_param = self.request.query_params.get('status', None)
+        if status_param:
+            queryset = queryset.filter(receipt_status=status_param)
+
+        return queryset.order_by('receipt_id')
 
 
-class ReceitbookDetailView(
+class ReceiptbookDetailView(
     AdminOnlyCRUDViewMixin,
     generics.RetrieveUpdateAPIView,
 ):
-    queryset = Receitbook.objects.select_related("for_user", "entry_by").all()
-    serializer_class = ReceitbookSerializer
-    lookup_field = "receit_id"
+    queryset = Receiptbook.objects.select_related("for_user", "entry_by").all()
+    serializer_class = ReceiptbookGenerationSerializer
+    lookup_field = "receipt_id"
 
 
 class DonationMemberListView(generics.ListAPIView):
@@ -186,7 +195,7 @@ class DonationMemberListView(generics.ListAPIView):
 
 class DonationListCreateView(generics.ListCreateAPIView):
     queryset = Donation.objects.select_related(
-        "receit_id",           # ✅ যোগ করো (Receitbook FK)
+        "receipt_id",           # ✅ যোগ করো (Receiptbook FK)
         "member",
         "donation_category",   # ✅
         "year_id",             # ✅
@@ -201,7 +210,7 @@ class DonationListCreateView(generics.ListCreateAPIView):
 
 class DonationDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Donation.objects.select_related(
-        "receit_id",
+        "receip_id",
         "member",
         "donation_category",
         "year_id",
@@ -251,3 +260,138 @@ class UserProfileDetailView(
     )
     serializer_class = UserProfileSerializer
     lookup_field = "profile_id"
+
+
+import random
+from django.db import transaction
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated # ✅ পারমিশন যোগ করা হলো
+from .models import Receiptbook
+from .serializers import ReceiptbookGenerationSerializer
+
+class GenerateReceiptbookAPIView(APIView):
+    # ✅ নিশ্চিত করা হলো যে ইউজার লগইন করা আছে (JWT Token ছাড়া কেউ হিট করতে পারবে না)
+    permission_classes = [IsAuthenticated] 
+
+    def post(self, request):
+        serializer = ReceiptbookGenerationSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            data = serializer.validated_data
+            
+            start_num = data['start_number']
+            end_num = data['end_number']
+            prefix = data.get('prefix', 'RCP')
+            for_user = data['for_user']
+            receipt_status = data['receipt_status']
+            description = data.get('description', '')
+            
+            # ৪ ডিজিটের একটি কমন বুক আইডি তৈরি (যেমন: 0013)
+            book_id = random.randint(1, 9999)
+            
+            created_receipts = []
+            
+            try:
+                # transaction.atomic() নিশ্চিত করে যে ১০০টির মধ্যে ১টি ফেইল করলে কোনো ডাটাই সেভ হবে না
+                with transaction.atomic():
+                    for num in range(start_num, end_num + 1):
+                        # ফরম্যাট: 0013-RCP0001, 0013-RCP0002 ...
+                        generated_receipt_id = f"{book_id:04d}-{prefix}{num:04d}"
+                        
+                        # ডুপ্লিকেট চেক
+                        if not Receiptbook.objects.filter(receipt_id=generated_receipt_id).exists():
+                            
+                            receipt = Receiptbook.objects.create(
+                                receipt_id=generated_receipt_id, 
+                                for_user=for_user,
+                                prefix=prefix,
+                                start_number=start_num, 
+                                end_number=end_num,     
+                                receipt_status=receipt_status,
+                                description=description,
+                                entry_by=request.user if request.user.is_authenticated else None # ✅ সেফটি চেক
+                            )
+                            created_receipts.append(receipt)
+
+                return Response(
+                    {
+                        "message": f"Successfully generated {len(created_receipts)} receipts.",
+                        "batch_id": f"{book_id:04d}"
+                    }, 
+                    status=status.HTTP_201_CREATED
+                )
+                
+            except Exception as e:
+                return Response(
+                    {"error": f"Something went wrong: {str(e)}"}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+    
+import random  # <-- ইম্পোর্ট নিশ্চিত করুন
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from .forms import ReceiptbookGenerationForm
+from .models import Receiptbook
+
+@login_required
+def receiptbook_generate(request):
+    user_profile = request.user.profile
+    
+    
+    if request.method == 'POST':
+        form = ReceiptbookGenerationForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            assigned_user = data['assigned_user']
+            prefix = data['prefix'] or ''
+            start = data['start_number']
+            end = data['end_number']
+            status = data['status']
+            description = data['description']
+            
+            receiptbooks_created = []
+            
+            # ৪ ডিজিটের বুক আইডি তৈরি (যেমন: 0013)। 
+            # চাইলে সরাসরি স্ট্রিংও দিতে পারেন: book_id = "0013"
+            book_id = random.randint(1000, 9999) 
+            
+            for num in range(start, end + 1):
+                # নতুন ফরম্যাট: 0013-RCP0001
+                receipt_number = f"{book_id:04d}-{prefix}{num:04d}" 
+                
+                if not Receiptbook.objects.filter(receipt_number=receipt_number).exists():
+                    receipt = Receiptbook.objects.create(
+                        receipt_number=receipt_number,
+                        assigned_user=assigned_user,
+                        status=status,
+                        description=description,
+                        created_by=request.user
+                    )
+                    receiptbooks_created.append(receipt)
+            
+            count = len(receiptbooks_created)
+            messages.success(
+                request, 
+                f'Successfully generated {count} receipt(s) for {assigned_user.username}!'
+            )
+            
+            if count > 0:
+                return redirect('receiptbook_list')
+            else:
+                messages.warning(request, 'No new receipts were created. All numbers may already exist.')
+    else:
+        form = ReceiptbookGenerationForm()
+    
+    context = {
+        'form': form,
+        'title': 'Generate Receiptbooks',
+    }
+    
+    return render(request, 'receiptbook/receiptbook_generate.html', context)

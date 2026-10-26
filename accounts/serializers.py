@@ -9,7 +9,7 @@ from .models import (
     DonationYear,
     Member,
     Member_profile,
-    Receitbook,
+    Receiptbook,
     UserProfile,
 )
 
@@ -178,53 +178,55 @@ class DonationYearSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["year_id", "entry_by", "created_at", "updated_at"]
 
+from rest_framework import serializers
+from django.contrib.auth import get_user_model
+from .models import Receiptbook
 
-class ReceitbookSerializer(serializers.ModelSerializer):
-    for_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
-    for_user_username = serializers.CharField(
-        source="for_user.username",
-        read_only=True,
-    )
+User = get_user_model()
+
+class ReceiptbookSerializer(serializers.ModelSerializer):
+    # UI-তে সুন্দর নাম দেখানোর জন্য
+    for_user_username = serializers.CharField(source='for_user.username', read_only=True)
+    receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
 
     class Meta:
-        model = Receitbook
+        model = Receiptbook
         fields = [
-            "receit_id",
-            "for_user",
+            "receipt_id", 
+            "for_user", 
             "for_user_username",
-            "prefix",
-            "start_number",
-            "end_number",
-            "receit_status",
+            "prefix", 
+            "start_number", 
+            "end_number", 
+            "receipt_status", 
+            "receipt_status_display", # React-এ স্ট্যাটাস দেখানোর জন্য এটি ব্যবহার করুন
             "description",
             "entry_by",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = [
-            "receit_id",
-            "for_user_username",
-            "entry_by",
-            "created_at",
-            "updated_at",
+
+
+class ReceiptbookGenerationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Receiptbook
+        # receipt_id এখানে নেই কারণ এটি views.py-তে অটোমেটিক জেনারেট হবে
+        fields = [
+            "for_user",
+            "prefix",
+            "start_number",
+            "end_number",
+            "receipt_status",
+            "description",
         ]
 
     def validate(self, attrs):
-        start_number = attrs.get(
-            "start_number",
-            self.instance.start_number if self.instance else None,
-        )
-        end_number = attrs.get(
-            "end_number",
-            self.instance.end_number if self.instance else None,
-        )
-        if (
-            start_number is not None
-            and end_number is not None
-            and start_number > end_number
-        ):
+        start_number = attrs.get("start_number")
+        end_number = attrs.get("end_number")
+        
+        if start_number is not None and end_number is not None and start_number > end_number:
             raise serializers.ValidationError(
-                {"end_number": "end_number must be >= start_number."}
+                {"end_number": "End number must be greater than or equal to start number."}
             )
         return attrs
 
@@ -234,16 +236,34 @@ from rest_framework import serializers
 from .models import Donation
 
 class DonationSerializer(serializers.ModelSerializer):
-    # ✅ নামগুলো রিটার্ন করার জন্য এই লাইনগুলো যোগ করুন
     category_name = serializers.CharField(source='donation_category.category_name', read_only=True)
     year_name = serializers.CharField(source='year_id.year_name', read_only=True)
-    member_name = serializers.CharField(source='member.member_name', read_only=True)   
     
+    # ✅ Member Name বের করার নিশ্চিত উপায়
+    member_name = serializers.SerializerMethodField()
+    
+    # ✅ Receipt Number বের করার নিশ্চিত উপায়
+    receipt_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Donation
         fields = '__all__'
 
+    def get_member_name(self, obj):
+        if obj.member:
+            # যদি Member মডেলে ফিল্ডের নাম 'name' হয়
+            return getattr(obj.member, 'name', None) or getattr(obj.member, 'member_name', "—")
+        return "—"
+
+    def get_receipt_number(self, obj):
+        # আপনার Donation মডেলে ফরেন কি ফিল্ডের নাম 'receipt_id' নাকি 'receip_id' তা চেক করুন
+        # এখানে আমি ধরে নিচ্ছি ফিল্ডের নাম 'receipt_id'
+        if obj.receipt_id:
+            return str(obj.receipt_id.receipt_id) 
+        elif getattr(obj, 'receip_id', None): # ব্যাকআপ চেক
+            return str(obj.receip_id.receipt_id)
+        return "—"
+    
 
 class UserIdOrUsernameField(serializers.PrimaryKeyRelatedField):
     def to_internal_value(self, data):

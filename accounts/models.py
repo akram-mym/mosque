@@ -135,11 +135,12 @@ class Donation(CommonModel):
 
     donation_id = models.AutoField(primary_key=True)
 
-    receit_id = models.ForeignKey(
-    'Receitbook',
+    receipt_id = models.ForeignKey(
+    'Receiptbook',
     on_delete=models.PROTECT,    # ✅ Receipt ব্যবহার হলে delete আটকাবে
     null=True,
     blank=False,
+    unique=True, # ✅ এই লাইনটি যোগ করুন (একটি রিসিট একবারই ব্যবহার হবে)
     related_name="donations",
     )
     member = models.ForeignKey(
@@ -182,8 +183,17 @@ class Donation(CommonModel):
 
     description = models.TextField(blank=True, null=True)
 
-    def __str__(self):
-        return f"Donation #{self.donation_id} - {self.donation_amount} ({self.paid_by})"
+    def save(self, *args, **kwargs):
+        # ১. প্রথমে ডোনেশনটি সেভ হবে
+        super().save(*args, **kwargs)
+
+        # ২. রিসিট স্ট্যাটাস আপডেট
+        if self.receipt_id:
+            receipt = self.receipt_id
+            # যদি স্ট্যাটাস আগে থেকেই 'used' না থাকে
+            if receipt.receipt_status != 'used':
+                receipt.receipt_status = 'used'
+                receipt.save(update_fields=['receipt_status'])
 
 
 
@@ -364,11 +374,11 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 
 
-class Receitbook(CommonModel):  # ✅ এখানে CommonModel ইনহেরিট করুন
-    recet_status_choices = [
+class Receiptbook(CommonModel):  # ✅ এখানে CommonModel ইনহেরিট করুন
+    receipt_status_choices = [
         ('unused',   'Unused'),
         ('used',     'Used'),
-        ('Rejected', 'Rejected'),
+        ('rejected', 'Rejected'),
     ]
 
     prefix       = models.CharField(max_length=10, default='RCPT')
@@ -380,16 +390,16 @@ class Receitbook(CommonModel):  # ✅ এখানে CommonModel ইনহে�
         on_delete=models.SET_NULL,
         null=True,
         blank=False,
-        related_name="receitbooks",
+        related_name="Receiptbook",
     )
 
-    receit_status = models.CharField(
+    receipt_status = models.CharField(
         max_length=20,
-        choices=recet_status_choices,
+        choices=receipt_status_choices,
         default='unused',
     )
 
-    receit_id = models.CharField(
+    receipt_id = models.CharField(
         max_length=30,
         primary_key=True,
         unique=True,
@@ -398,28 +408,7 @@ class Receitbook(CommonModel):  # ✅ এখানে CommonModel ইনহে�
     )
 
     description = models.TextField(blank=True, null=True)
-
-    # ---------- helper ----------
-    def generate_receit_id(self):
-        """
-        Format: {for_user.id:04d}-{prefix}{start_number:04d}-{end_number:04d}
-        Example: 0005-RCPT0001-0100
-        """
-        if self.for_user_id is None:
-            raise ValidationError(
-                "`for_user` must be set before generating `receit_id`."
-            )
-        if self.start_number > self.end_number:
-            raise ValidationError(
-                "start_number cannot be greater than end_number."
-            )
-
-        return (
-            f"{self.for_user_id:04d}-"
-            f"{self.prefix}{self.start_number:04d}-"
-            f"{self.end_number:04d}"
-        )
-
+    
     # ---------- clean ----------
     def clean(self):
         super().clean()
@@ -428,24 +417,11 @@ class Receitbook(CommonModel):  # ✅ এখানে CommonModel ইনহে�
                 {"end_number": "end_number must be >= start_number."}
             )
 
-    # ---------- save ----------
-    def save(self, *args, **kwargs):
-        is_new = self._state.adding
-
-        with transaction.atomic():
-            if is_new and not self.receit_id:
-                self.receit_id = self.generate_receit_id()
-
-            try:
-                super().save(*args, **kwargs)
-            except IntegrityError:
-                raise ValidationError(
-                    f"Receitbook with id {self.receit_id} already exists."
-                )
-
+    
     def __str__(self):
-        return f"Receit {self.receit_id}"
+        return f"Receipt {self.receipt_id}"
 
+    
 
 
 

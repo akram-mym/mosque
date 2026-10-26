@@ -12,40 +12,47 @@ const emptyMember = {
   village: "",
   member_type: "General",
 };
+
 function formatMemberDisplayId(value) {
   if (!value) return "—";
   const parts = String(value).split("-");
-  // যদি ফরম্যাট "00002-01-0002" এরকম হয়
   if (parts.length >= 3) {
-    return `${parts[1]}-${parts[2]}`; // "01-0002" রিটার্ন করবে
+    return `${parts[1]}-${parts[2]}`;
   }
   return value;
 }
-function formatDateTime(dateString) {
-  if (!dateString) return "—";
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString;
-  return date.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+
+// ✅ Member List-এ আইডি '01-0001' ফরম্যাটে দেখানোর জন্য
+function formatMemberIdForList(member) {
+  if (!member) return "—";
+  
+  const idString = String(member.id || "");
+  
+  // ১. যদি ব্যাকএন্ড থেকে "00002-01-0002" বা "00002-fakirbari-0002" এরকম আসে
+  if (idString.includes("-")) {
+    const parts = idString.split("-");
+    if (parts.length >= 3) {
+      const villagePart = parts[1];
+      const code = villageValueToCode[villagePart?.toLowerCase()] || villagePart;
+      return `${code}-${parts[2]}`;
+    }
+  }
+  
+  // ২. যদি ব্যাকএন্ড থেকে শুধু নাম্বার আসে (যেমন: 1) এবং village ফিল্ড থাকে
+  const villageCode = villageValueToCode[member.village?.toLowerCase()] || "01";
+  const paddedId = idString.padStart(4, "0");
+  return `${villageCode}-${paddedId}`;
 }
+
 function calculateAgeYears(birthDate) {
   if (!birthDate) return null;
-
   const birth = new Date(`${birthDate}T00:00:00`);
   if (Number.isNaN(birth.getTime())) return null;
-
   const today = new Date();
   let age = today.getFullYear() - birth.getFullYear();
   const birthdayHasPassed =
     today.getMonth() > birth.getMonth() ||
-    (today.getMonth() === birth.getMonth() &&
-      today.getDate() >= birth.getDate());
-
+    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
   if (!birthdayHasPassed) age -= 1;
   return age;
 }
@@ -63,7 +70,7 @@ const menuItems = [
   { name: "Donation Categories", icon: "bi-tags-fill" },
   { name: "Donation Years", icon: "bi-calendar3" },
   { name: "User Profiles", icon: "bi-person-badge-fill" },
-  { name: "Receitbook", icon: "bi-receipt-cutoff", adminOnly: true },
+  { name: "Receiptbook", icon: "bi-receipt-cutoff", adminOnly: true },
 ];
 
 const memberCountVillages = [
@@ -98,7 +105,6 @@ function normalizeVillageValue(value) {
 function formatDonationMemberId(value) {
   const [, village, villageSequence] = String(value).split("-");
   const villageCode = villageValueToCode[village?.toLowerCase()] || village;
-
   return villageCode && villageSequence
     ? `${villageCode}-${villageSequence}`
     : String(value);
@@ -123,33 +129,37 @@ const pageConfig = {
     addLabel: "Add Donation",
     columns: [
       ["donation_id", "ID"],
-      ["member_name", "Member"],       // ✅ Serializer থেকে আসা নাম
-      ["receit_id", "Receipt"],        // ✅ Receipt Book ID
-      ["category_name", "Category"],   // ✅ Serializer থেকে আসা ক্যাটাগরি নাম
+      ["member_name", "Member"],
+      ["receipt_number", "Receipt"], // ✅ এখানে receipt_number থাকতে হবে
+      ["category_name", "Category"],
       ["donation_amount", "Amount"],
       ["paid_by", "Paid By"],
       ["donation_date", "Date"],
-      ["year_name", "Year"],           // ✅ Serializer থেকে আসা ইয়ারের নাম
+      ["year_name", "Year"],
     ],
     formFields: [
       {
-        key: "receit_id", 
-        label: "Receipt Book",
+        key: "receipt_id", 
+        label: "Receipt List",
         type: "select",
-        optionsEndpoint: "accounts/receitbooks/",
-        optionId: "receit_id",
-        optionLabel: "receit_id",
+        optionsEndpoint: "accounts/receiptbooks/?for_me=true&status=unused", 
+        optionId: "receipt_id", 
+        optionLabelFormatter: (option) => {
+          const receiptId = option.receipt_id || "";
+          const desc = option.description ? ` (${option.description})` : "";
+          return `${receiptId}${desc}`;
+        },
         required: true,
       },
       {
-        key: "member",                   // ✅ এখানে member_id এর বদলে member হবে
+        key: "member",
         label: "Member",
         type: "select",
         optionsEndpoint: "accounts/donation-members/",
         optionId: "id",
         optionLabel: "name",
         optionLabelWithId: true,
-        required: true,                  // মেম্বার ছাড়া ডোনেশন নিতে না চাইলে
+        required: true,
       },
       {
         key: "donation_category",
@@ -167,7 +177,7 @@ const pageConfig = {
         default: "0.00",
       },
       {
-        key: "paid_by",                  // ✅ এই ফিল্ডটি বাদ পড়েছিল
+        key: "paid_by",
         label: "Paid By",
         type: "select",
         required: true,
@@ -180,7 +190,7 @@ const pageConfig = {
         default: "cash",
       },
       {
-        key: "donation_date",            // ✅ এই ফিল্ডটিও বাদ পড়েছিল
+        key: "donation_date",
         label: "Date",
         type: "date",
         required: true,
@@ -193,10 +203,10 @@ const pageConfig = {
         optionId: "year_id",
         optionLabel: "year_name",
       },
-      { 
-        key: "description", 
-        label: "Description", 
-        type: "textarea" 
+      {
+        key: "description",
+        label: "Description",
+        type: "textarea",
       },
     ],
   },
@@ -228,17 +238,16 @@ const pageConfig = {
       { key: "status", label: "Active", type: "checkbox" },
     ],
   },
-  Receitbook: {
-    endpoint: "accounts/receitbooks/",
-    idField: "receit_id",
-    addLabel: "Add Receitbook",
+  Receiptbook: {
+    endpoint: "accounts/receiptbooks/", 
+    createEndpoint: "accounts/receiptbooks/generate/", 
+    idField: "receipt_id", // ✅ এখানে id এর জায়গায় receipt_id করা হলো
+    addLabel: "Add Receiptbook",
     columns: [
-      ["receit_id", "Receipt Book ID"],
+      ["receipt_id", "Receipt ID"],
       ["for_user_username", "Assigned User"],
-      ["prefix", "Prefix"],
-      ["start_number", "Start Number"],
-      ["end_number", "End Number"],
-      ["receit_status", "Status"],
+      ["description", "For"],
+      ["receipt_status", "Status"],
     ],
     formFields: [
       {
@@ -250,7 +259,7 @@ const pageConfig = {
         optionLabel: "username",
         required: true,
       },
-      { key: "prefix", label: "Prefix", type: "text", required: true, default: "RCPT" },
+      { key: "prefix", label: "Prefix", type: "text", required: true, default: "RCP" },
       {
         key: "start_number",
         label: "Start Number",
@@ -268,7 +277,7 @@ const pageConfig = {
         default: 100,
       },
       {
-        key: "receit_status",
+        key: "receipt_status",
         label: "Status",
         type: "select",
         required: true,
@@ -866,7 +875,7 @@ export default function App() {
               profile={profile}
               canAddUser={isAdmin}
               canEditDonation={isAdmin}
-              canManageReceitbook={isAdmin}
+              canManageReceiptbook={isAdmin}
             />
           )}
         </section>
@@ -989,6 +998,11 @@ function MembersPage({
   const [editingDetails, setEditingDetails] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState("");
+
+  // --- Pagination State for Members ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [searchTerm, setSearchTerm] = useState("");
   const memberFields = [
     ["id", "Member ID"],
     ["name", "Name"],
@@ -1008,6 +1022,28 @@ function MembersPage({
     ["village", "Village", "select"],
     ["member_type", "Member Type", "text"],
   ];
+
+    // ✅ ১. সার্চ ফিল্টার লজিক (যেকোনো ফিল্ডের ভ্যালু দিয়ে সার্চ)
+  const filteredMembers = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return members;
+    
+    return members.filter((member) =>
+      Object.values(member).some((value) => {
+        const normalized =
+          value && typeof value === "object"
+            ? JSON.stringify(value)
+            : String(value ?? "");
+        return normalized.toLowerCase().includes(query);
+      })
+    );
+  }, [members, searchTerm]);
+
+  // ✅ ২. ফিল্টার করা ডাটা দিয়ে পেজিনেশন হিসাব
+  const totalPages = Math.ceil(filteredMembers.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentMembers = filteredMembers.slice(indexOfFirstItem, indexOfLastItem);
 
   async function openMemberDetails(member) {
     setViewingMember(member);
@@ -1103,9 +1139,25 @@ function MembersPage({
           )}
         </div>
       </div>
-      {message && <div className="alert alert-success">{message}</div>}
-      {error && <div className="alert alert-warning">{error}</div>}
-      <div className="content-card">
+            {message && <div className="alert alert-success">{message}</div>}
+            {error && <div className="alert alert-warning">{error}</div>}
+            
+            <div className="content-card">
+              {/* ✅ সার্চ বার শুরু */}
+              <div className="d-flex flex-column flex-sm-row justify-content-between gap-3 mb-4">
+                <h5 className="fw-bold mb-0 align-self-center">Members list</h5>
+                <input
+                  className="form-control search-input"
+                  placeholder="Search members by any field..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1); // সার্চ করলে আবার ১ম পেজে চলে আসবে
+                  }}
+                />
+              </div>
+              {/* ✅ সার্চ বার শেষ */}
+
         <div className="table-responsive">
           <table className="table align-middle">
             <thead>
@@ -1118,11 +1170,11 @@ function MembersPage({
             <tbody>
               {loading ? (
                 <tr><td colSpan={8} className="text-center py-5"><span className="spinner-border spinner-border-sm text-success me-2" />Loading members...</td></tr>
-              ) : members.length === 0 ? (
+              ) : currentMembers.length === 0 ? (
                 <tr><td colSpan={8} className="text-center text-secondary py-5">No members found yet.</td></tr>
-              ) : members.map((member) => (
+              ) : currentMembers.map((member) => (
                 <tr key={member.id}>
-                  <td>{member.id}</td>
+                  <td>{formatMemberIdForList(member)}</td>
                   <td>
                     {member.member_picture ? (
                       <img
@@ -1174,8 +1226,36 @@ function MembersPage({
             </tbody>
           </table>
         </div>
-        <small className="text-secondary">{members.length} member(s)</small>
+        
+        {/* --- Members Pagination Footer --- */}
+        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-center mt-3">
+          <small className="text-secondary mb-2 mb-sm-0">
+            Showing {filteredMembers.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredMembers.length)} of {filteredMembers.length} member(s)
+          </small>
+          {totalPages > 1 && (
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1 || loading}
+              >
+                <i className="bi bi-chevron-left"></i> Previous
+              </button>
+              <span className="align-self-center px-2 small">Page {currentPage} of {totalPages}</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages || loading}
+              >
+                Next <i className="bi bi-chevron-right"></i>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+      
       {viewingMember && (
         <div
           className="modal d-block"
@@ -1235,7 +1315,7 @@ function MembersPage({
                         <div className="member-detail-item" key={field}>
                           <dt className="member-detail-label">{label}</dt>
                           <dd className="member-detail-value">
-                            {detailsForm[field] || "—"}
+                            {field === "id" ? formatMemberIdForList(detailsForm) : detailsForm[field] || "—"}
                           </dd>
                         </div>
                       ))}
@@ -1342,7 +1422,10 @@ function MembersPage({
                         <div className="member-detail-item">
                           <dt className="member-detail-label">Member ID</dt>
                           <dd className="member-detail-value">
-                            {profile.member ?? detailsForm.id}
+                            {formatMemberIdForList({ 
+                              id: profile.member ?? detailsForm.id, 
+                              village: detailsForm.village 
+                            })}
                           </dd>
                         </div>
                         <div className="member-detail-item">
@@ -1841,7 +1924,7 @@ function GenericManagementPage({
   profile,
   canAddUser,
   canEditDonation,
-  canManageReceitbook,
+  canManageReceiptbook,
 }) {
   const config = pageConfig[page];
   const [rows, setRows] = useState([]);
@@ -1849,6 +1932,10 @@ function GenericManagementPage({
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [flash, setFlash] = useState("");
+
+  // --- Pagination State ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Add / Edit modal state
   const [showForm, setShowForm] = useState(false);
@@ -1875,7 +1962,7 @@ function GenericManagementPage({
   const [choiceOptions, setChoiceOptions] = useState({});
   const [choicesLoadedFor, setChoicesLoadedFor] = useState("");
   const [choiceError, setChoiceError] = useState("");
-  const hasAsyncChoices = ["Donations", "Receitbook"].includes(page);
+  const hasAsyncChoices = ["Donations", "Receiptbook"].includes(page);
   const choiceLoading = hasAsyncChoices && choicesLoadedFor !== page;
 
   // Delete confirmation state
@@ -1886,6 +1973,7 @@ function GenericManagementPage({
     if (!hasAsyncChoices) return undefined;
 
     let cancelled = false;
+
     Promise.all(
       config.formFields
         .filter((field) => field.optionsEndpoint)
@@ -1894,16 +1982,20 @@ function GenericManagementPage({
             field.optionsEndpoint,
             authConfig(token)
           );
-          const options = getList(response.data).map((option) => [
-            String(option[field.optionId]),
-            field.optionLabelWithId
-              ? `${option[field.optionLabel]} (${formatDonationMemberId(option[field.optionId])})`
-              : option[field.optionLabel] || `#${option[field.optionId]}`,
-          ]);
-          return [
-            field.key,
-            options,
-          ];
+
+          const options = getList(response.data).map((option) => {
+            let label = "";
+            if (field.optionLabelFormatter) {
+              label = field.optionLabelFormatter(option);
+            } else if (field.optionLabelWithId) {
+              label = `${option[field.optionLabel]} (${formatDonationMemberId(option[field.optionId])})`;
+            } else {
+              label = option[field.optionLabel] || `#${option[field.optionId]}`;
+            }
+            return [String(option[field.optionId]), label];
+          });
+
+          return [field.key, options];
         })
     )
       .then((options) => {
@@ -1924,7 +2016,7 @@ function GenericManagementPage({
             ? typeof data === "string"
               ? data
               : JSON.stringify(data)
-              : "Could not load form choices. Please try again."
+            : "Could not load form choices. Please try again."
         );
         setChoicesLoadedFor(page);
       });
@@ -1991,6 +2083,11 @@ function GenericManagementPage({
     };
   }, [config.endpoint, page, token]);
 
+  // Reset page when switching between tabs or searching
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [page, search]);
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return rows;
@@ -2005,12 +2102,60 @@ function GenericManagementPage({
     );
   }, [rows, search]);
 
-  function openAdd() {
+  // --- Pagination Logic ---
+  const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredRows.slice(indexOfFirstItem, indexOfLastItem);
+
+    function openAdd() {
     setEditingRow(null);
     setForm(buildEmptyForm());
     setFormError("");
     setChoiceError("");
     setShowForm(true);
+
+    // ✅ নতুন লজিক: ফর্ম ওপেন করার সময় ড্রপডাউনের অপশনগুলো রিফ্রেশ করা
+    if (hasAsyncChoices) {
+      Promise.all(
+        config.formFields
+          .filter((field) => field.optionsEndpoint)
+          .map(async (field) => {
+            const response = await api.get(field.optionsEndpoint, authConfig(token));
+            
+            const options = getList(response.data).map((option) => {
+              let label = "";
+              if (field.optionLabelFormatter) {
+                label = field.optionLabelFormatter(option);
+              } else if (field.optionLabelWithId) {
+                label = `${option[field.optionLabel]} (${formatDonationMemberId(option[field.optionId])})`;
+              } else {
+                label = option[field.optionLabel] || `#${option[field.optionId]}`;
+              }
+              return [String(option[field.optionId]), label];
+            });
+            return [field.key, options];
+          })
+      )
+        .then((options) => {
+          setChoiceOptions((current) => ({
+            ...current,
+            ...Object.fromEntries(options),
+          }));
+          setChoicesLoadedFor(page); // ✅ অপশন লোড হওয়ার স্টেট আপডেট
+        })
+        .catch((error) => {
+          console.error("Error reloading choices:", error);
+          const data = error.response?.data;
+          setChoiceError(
+            data
+              ? typeof data === "string"
+                ? data
+                : JSON.stringify(data)
+              : "Could not reload form choices."
+          );
+        });
+    }
   }
 
   function getEditForm(row) {
@@ -2066,28 +2211,11 @@ function GenericManagementPage({
     }
   }
 
+  // ✅ API কল ছাড়াই সরাসরি টেবিলের ডাটা দিয়ে ভিউ দেখানো হচ্ছে (এরর এড়াতে)
   async function openViewModel(row) {
     setViewingRow(row);
-    setViewLoading(true);
-    setViewError("");
-    try {
-      const response = await api.get(
-        `${config.endpoint}${row[config.idField]}/`,
-        authConfig(token)
-      );
-      setViewingRow(response.data);
-    } catch (err) {
-      const data = err.response?.data;
-      setViewError(
-        data
-          ? typeof data === "string"
-            ? data
-            : JSON.stringify(data)
-          : `Could not load ${page === "Donations" ? "donation" : "profile"} details. Please try again.`
-      );
-    } finally {
-      setViewLoading(false);
-    }
+    setViewLoading(false); 
+    setViewError(""); 
   }
 
   async function handleCreateUser(event) {
@@ -2165,7 +2293,9 @@ function GenericManagementPage({
         await api.patch(`${config.endpoint}${id}/`, data, authConfig(token));
         setFlash("Record updated successfully.");
       } else {
-        await api.post(config.endpoint, data, authConfig(token));
+        // ✅ এখানে createEndpoint থাকলে সেটি ব্যবহার করবে, অন্যথায় endpoint ব্যবহার করবে
+        const postUrl = config.createEndpoint || config.endpoint;
+        await api.post(postUrl, data, authConfig(token));
         setFlash("Record created successfully.");
       }
       setShowForm(false);
@@ -2200,7 +2330,7 @@ function GenericManagementPage({
         <div>
           <h2 className="fw-bold mb-1">{page}</h2>
           <p className="text-secondary mb-0">
-            {page === "Receitbook"
+            {page === "Receiptbook"
               ? "View, create, and edit receipt books."
               : page === "Donations"
               ? canEditDonation
@@ -2225,7 +2355,7 @@ function GenericManagementPage({
             </button>
           )}
           {page !== "User Profiles" &&
-            (page !== "Receitbook" || canManageReceitbook) && (
+            (page !== "Receiptbook" || canManageReceiptbook) && (
             <button type="button" className="btn btn-success" onClick={openAdd}>
               <i className="bi bi-plus-lg me-2" />
               {config.addLabel}
@@ -2265,123 +2395,144 @@ function GenericManagementPage({
                   <th className="text-end">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {filteredRows.map((row, index) => (
-                  <tr key={row[config.idField] ?? index}>
-                    {config.columns.map(([key]) => {
-                      const value =
-                        key === "user" && row.user && typeof row.user === "object"
-                        ? row.user.id ?? JSON.stringify(row.user)
-                          : row[key];
-                      return (
-                        <td key={key}>
-                          {key === "status" || key === "is_staff" ? (
-                            <span
-                              className={`status-pill ${
-                                value ? "status-active" : "status-inactive"
-                              }`}
-                            >
-                              {key === "is_staff"
-                                ? value
-                                  ? "Enabled"
-                                  : "Disabled"
-                                : value
-                                  ? "Active"
-                                  : "Inactive"}
-                            </span>
-                          ) : key === "user_picture" ? (
-                            value ? (
-                              <img
-                                src={value}
-                                alt="User profile"
-                                className="user-picture-thumbnail"
-                              />
-                            ) : (
-                              <span className="user-picture-placeholder">
-                                <i className="bi bi-person-fill" aria-hidden="true" />
+                            <tbody>
+                {currentItems.map((row, index) => {
+                  return (
+                    <tr key={row[config.idField] ?? index}>
+                      {config.columns.map(([key]) => {
+                        let value = row[key];
+                        
+                        // ✅ ১. ইউজার অবজেক্ট হ্যান্ডেল করা
+                        if (key === "user" && row.user && typeof row.user === "object") {
+                          value = row.user.id ?? JSON.stringify(row.user);
+                        }
+                        
+                        // ✅ ২. Receipt ID যদি অবজেক্ট হিসেবে আসে, তবে ভেতর থেকে আইডি বের করা
+                        if ((key === "receip_id" || key === "receipt_id" || key === "receipt_number") && value && typeof value === "object") {
+                          value = value.receipt_id || value.receip_id || value.id || JSON.stringify(value);
+                        }
+
+                        // ✅ ৩. Member যদি অবজেক্ট হিসেবে আসে, তবে নাম বের করা
+                        if (key === "member" && value && typeof value === "object") {
+                          value = value.name || value.member_name || JSON.stringify(value);
+                        }
+
+                        return (
+                          <td key={key}>
+                            {key === "status" || key === "is_staff" ? (
+                              <span
+                                className={`status-pill ${
+                                  value ? "status-active" : "status-inactive"
+                                }`}
+                              >
+                                {key === "is_staff"
+                                  ? value
+                                    ? "Enabled"
+                                    : "Disabled"
+                                  : value
+                                    ? "Active"
+                                    : "Inactive"}
                               </span>
-                            )
-                          ) : key === "donation_amount" ? (
-                            value == null ? "—" : Number(value).toFixed(2)
-                          ) : key === "village_selected_id" ? (
-                            Array.isArray(value) && value.length > 0
-                              ? value
-                                  .map(
-                                    (village) =>
-                                      villageSelectionOptions.find(
-                                        ([option]) => option === village
-                                      )?.[1] || village
-                                  )
-                                  .join(", ")
-                              : "—"
-                          ) : (
-                            String(value ?? "—")
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="text-end">
-                      {(page === "User Profiles" ||
-                        page === "Donations" ||
-                        page === "Receitbook") && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-success me-2"
-                          onClick={() => openViewModel(row)}
-                          title="ViewModel"
-                        >
-                          View
-                        </button>
-                      )}
-                      {page !== "Donations" &&
-                        page !== "Receitbook" && (
-                        <>
+                            ) : key === "user_picture" ? (
+                              value ? (
+                                <img
+                                  src={value}
+                                  alt="User profile"
+                                  className="user-picture-thumbnail"
+                                />
+                              ) : (
+                                <span className="user-picture-placeholder">
+                                  <i className="bi bi-person-fill" aria-hidden="true" />
+                                </span>
+                              )
+                            ) : key === "donation_amount" ? (
+                              value == null ? "—" : Number(value).toFixed(2)
+                            ) : key === "village_selected_id" ? (
+                              Array.isArray(value) && value.length > 0
+                                ? value
+                                    .map(
+                                      (village) =>
+                                        villageSelectionOptions.find(
+                                          ([option]) => option === village
+                                        )?.[1] || village
+                                    )
+                                    .join(", ")
+                                : "—"
+                            ) : (key === "receipt_number" || key === "receipt_id" || key === "receip_id") && value ? (
+                              /* ✅ ৪. Receipt ID থেকে হাইফেনের আগের অংশ বাদ দেওয়া */
+                              String(value).includes("-") ? String(value).split("-").pop() : String(value)
+                            ) : key === "member_name" && value ? (
+                              /* ✅ ৫. মেম্বারের নাম নিশ্চিতভাবে টেক্সট হিসেবে দেখানো */
+                              String(value)
+                            ) : (
+                              String(value ?? "—")
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="text-end">
+                        {(page === "User Profiles" ||
+                          page === "Donations" ||
+                          page === "Receiptbook") && (
                           <button
                             type="button"
-                            className="btn btn-sm btn-outline-primary me-2"
+                            className="btn btn-sm btn-outline-success me-2"
+                            onClick={() => openViewModel(row)}
+                            title="ViewModel"
+                          >
+                            View
+                          </button>
+                        )}
+                        {page !== "Donations" && page !== "Receiptbook" && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-primary me-2"
+                              onClick={() => openEdit(row)}
+                              disabled={editLoadingId === row[config.idField]}
+                              title="Edit"
+                            >
+                              {editLoadingId === row[config.idField] ? (
+                                <span className="spinner-border spinner-border-sm" />
+                              ) : (
+                                <i className="bi bi-pencil-square" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={() => setDeleteTarget(row)}
+                              title="Delete"
+                            >
+                              <i className="bi bi-trash" />
+                            </button>
+                          </>
+                        )}
+                        {page === "Receiptbook" && canManageReceiptbook && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary"
                             onClick={() => openEdit(row)}
-                            disabled={editLoadingId === row[config.idField]}
                             title="Edit"
                           >
-                            {editLoadingId === row[config.idField] ? (
-                              <span className="spinner-border spinner-border-sm" />
-                            ) : (
-                              <i className="bi bi-pencil-square" />
-                            )}
+                            <i className="bi bi-pencil-square" />
                           </button>
+                        )}
+                        {page === "Donations" && canEditDonation && (
                           <button
                             type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => setDeleteTarget(row)}
-                            title="Delete"
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => openEdit(row)}
+                            title="Edit"
                           >
-                            <i className="bi bi-trash" />
+                            <i className="bi bi-pencil-square" />
                           </button>
-                        </>
-                      )}
-                      {page === "Receitbook" && canManageReceitbook && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-primary"
-                          onClick={() => openEdit(row)}
-                          title="Edit"
-                        >
-                          <i className="bi bi-pencil-square" />
-                        </button>
-                      )}
-                      {page === "Donations" && canEditDonation && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-primary"
-                          onClick={() => openEdit(row)}
-                          title="Edit"
-                        >
-                          <i className="bi bi-pencil-square" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                
                 {filteredRows.length === 0 && (
                   <tr>
                     <td
@@ -2396,12 +2547,39 @@ function GenericManagementPage({
             </table>
           </div>
         )}
-        <small className="text-secondary">{filteredRows.length} record(s)</small>
+        
+        {/* --- Generic Management Pagination Footer --- */}
+        <div className="d-flex flex-column flex-sm-row justify-content-between align-items-center mt-3">
+          <small className="text-secondary mb-2 mb-sm-0">
+            Showing {filteredRows.length > 0 ? indexOfFirstItem + 1 : 0} to {Math.min(indexOfLastItem, filteredRows.length)} of {filteredRows.length} record(s)
+          </small>
+          {totalPages > 1 && (
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1 || loading}
+              >
+                <i className="bi bi-chevron-left"></i> Previous
+              </button>
+              <span className="align-self-center px-2 small">Page {currentPage} of {totalPages}</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages || loading}
+              >
+                Next <i className="bi bi-chevron-right"></i>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {(page === "User Profiles" ||
         page === "Donations" ||
-        page === "Receitbook") && viewingRow && (
+        page === "Receiptbook") && viewingRow && (
         <div
           className="modal-backdrop-custom"
           onClick={() => !viewLoading && setViewingRow(null)}
@@ -2412,14 +2590,14 @@ function GenericManagementPage({
                 <h5 className="fw-bold mb-1">
                   {page === "Donations"
                     ? "Donation Details"
-                    : page === "Receitbook"
-                      ? "Receitbook Details"
+                    : page === "Receiptbook"
+                      ? "Receiptbook Details"
                       : "User Profile Details"}
                 </h5>
                 <p className="text-secondary mb-0">
                   {page === "Donations"
                     ? "All information for this donation"
-                    : page === "Receitbook"
+                    : page === "Receiptbook"
                       ? "Receipt book range, assignment, and status"
                       : "Profile and linked account information"}
                 </p>
@@ -2438,7 +2616,7 @@ function GenericManagementPage({
                 <p className="text-secondary mt-2 mb-0">
                   {page === "Donations"
                     ? "Loading donation..."
-                    : page === "Receitbook"
+                    : page === "Receiptbook"
                       ? "Loading receipt book..."
                       : "Loading profile..."}
                 </p>
@@ -2461,7 +2639,8 @@ function GenericManagementPage({
                   {(page === "Donations"
                     ? [
                           ["donation_id", "Donation ID"],
-                          ["member", "Member ID"], // ✅ এখানে member_id এর জায়গায় শুধু member হবে
+                          ["receipt_number", "Receipt Number"],
+                          ["member", "Member ID"], 
                           ["member_name", "Member Name"],
                           ["donation_category", "Category ID"],
                           ["category_name", "Category"],
@@ -2474,14 +2653,14 @@ function GenericManagementPage({
                           ["created_at", "Created"],
                           ["updated_at", "Last Updated"],
                         ]
-                    : page === "Receitbook"
+                    : page === "Receiptbook"
                       ? [
-                          ["receit_id", "Receipt Book ID"],
+                          ["receipt_id", "Receipt Book ID"],
                           ["for_user_username", "Assigned User"],
                           ["prefix", "Prefix"],
                           ["start_number", "Start Number"],
                           ["end_number", "End Number"],
-                          ["receit_status", "Status"],
+                          ["receipt_status", "Status"],
                           ["description", "Description"],
                           ["entry_by", "Entered By"],
                           ["created_at", "Created"],
@@ -2515,13 +2694,13 @@ function GenericManagementPage({
                                 ? "Active"
                                 : "Inactive"
                              : key === "donation_amount" && value != null
-                                ? `৳ ${Number(value).toFixed(2)}` // ✅ টাকার চিহ্ন যোগ করা হলো
+                                ? `৳ ${Number(value).toFixed(2)}` 
                                 : key === "paid_by"
-                                  ? String(value || "—").charAt(0).toUpperCase() + String(value || "—").slice(1) // ✅ Cash, Bkash
+                                  ? String(value || "—").charAt(0).toUpperCase() + String(value || "—").slice(1) 
                                   : key === "member"
-                                    ? formatMemberDisplayId(value) // ✅ 01-0002 ফরম্যাট
+                                    ? formatMemberDisplayId(value) 
                                     : (key === "created_at" || key === "updated_at") && value
-                                      ? new Date(value).toLocaleString("en-GB", { // ✅ সুন্দর ডেট ফরম্যাট
+                                      ? new Date(value).toLocaleString("en-GB", { 
                                           year: "numeric", month: "short", day: "numeric",
                                           hour: "2-digit", minute: "2-digit"
                                         })

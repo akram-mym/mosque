@@ -900,12 +900,12 @@ class ReceitbookRoleAPITests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        receit_id = response.data["receit_id"]
+        receip_id = response.data["receip_id"]
         self.assertEqual(response.data["for_user_username"], "admin")
         self.assertEqual(response.data["entry_by"], self.admin.pk)
-        self.assertTrue(Receitbook.objects.filter(pk=receit_id).exists())
+        self.assertTrue(Receitbook.objects.filter(pk=receip_id).exists())
 
-        detail_url = f"{self.receitbooks_url}{receit_id}/"
+        detail_url = f"{self.receitbooks_url}{receip_id}/"
         response = self.client.get(detail_url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["description"], "Second range")
@@ -917,7 +917,7 @@ class ReceitbookRoleAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.receitbook.refresh_from_db()
-        updated = Receitbook.objects.get(pk=receit_id)
+        updated = Receitbook.objects.get(pk=receip_id)
         self.assertEqual(updated.receit_status, "used")
         self.assertEqual(updated.description, "Updated range")
 

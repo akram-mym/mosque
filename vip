@@ -1,0 +1,12 @@
+
+# command for file upload in git 
+
+# git init
+# git add .
+# git commit -m "আপনার পরিবর্তনের বিবরণ"
+# git push
+
+ git init
+ git add .
+ git commit -m "2nd Upload"
+ git push
